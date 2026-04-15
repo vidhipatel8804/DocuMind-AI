@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voice Input</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<nav class="navbar">
+    <div class="logo">DocuMind AI</div>
+    <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/chat">Chat</a>
+        <a href="/summary">Summary</a>
+        <a href="/voice" class="active">Voice</a>
+    </div>
+</nav>
+
+<div class="chat-container voice-box">
+
+    <h2>Voice Assistant</h2>
+
+    <button id="micBtn" class="mic-btn" onclick="startListening()">🎙️</button>
+    <p id="statusText" class="listening-text"></p>
+
+    <form method="POST" onsubmit="showLoading()">
+        <div class="input-group">
+            <input type="text" name="query" id="voiceText" placeholder="Your speech will appear here..." required>
+            <button id="askBtn" type="submit">Ask</button>
+        </div>
+    </form>
+
+    <p id="loadingText" class="loading-text" style="display:none;">Processing...</p>
+
+    <div id="chat-box">
+    {% for msg in chat %}
+        <div class="message {{ msg.role }}">
+            {{ msg.text }}
+        </div>
+    {% endfor %}
+    </div>
+
+    <div class="download-section">
+        <a href="/download_voice" class="download-btn">Download PDF</a>
+    </div>
+
+</div>
+
+<script>
+function showLoading() {
+    document.getElementById("loadingText").style.display = "block";
+    document.getElementById("askBtn").disabled = true;
+}
+
+function startListening() {
+    const micBtn = document.getElementById("micBtn");
+    const statusText = document.getElementById("statusText");
+
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = "en-US";
+
+    micBtn.classList.add("listening");
+    statusText.innerText = "Listening...";
+
+    recognition.start();
+
+    recognition.onresult = function(event) {
+        document.getElementById("voiceText").value = event.results[0][0].transcript;
+    };
+
+    recognition.onend = function() {
+        micBtn.classList.remove("listening");
+        statusText.innerText = "";
+    };
+
+    recognition.onerror = function() {
+        micBtn.classList.remove("listening");
+        statusText.innerText = "⚠️ Mic error";
+    };
+}
+</script>
+
+<script src="{{ url_for('static', filename='particles.js') }}"></script>
+
+</body>
+</html>

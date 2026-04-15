@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+    <div class="logo">DocuMind AI</div>
+    <div class="nav-links">
+        <a href="/" class="active">Home</a>
+        <a href="/chat">Chat</a>
+        <a href="/summary">Summary</a>
+        <a href="/voice">Voice</a>
+    </div>
+</nav>
+
+<div class="upload-container">
+
+    <h1>DocuMind AI</h1>
+    <p class="tagline">"Turn your documents into insights!" </p>
+    <p>Upload your document to begin</p>
+
+    <form method="POST" enctype="multipart/form-data">
+        
+        <!-- Browse File Button -->
+        <label class="file-label">
+            Browse File
+            <input type="file" name="file" onchange="showFileName(this)" required>
+        </label>
+
+        <!-- File Name -->
+        <div id="file-name" class="file-name"></div>
+
+        <!-- Upload Button -->
+        <button class="primary-btn">Upload</button>
+
+    </form>
+
+    <!-- Proceed Button -->
+    {% if success %}
+    <div id="proceed-section" style="display:none;">
+        <button class="primary-btn" onclick="goToChat()">Proceed →</button>
+    </div>
+    {% endif %}
+
+    <!-- 💜 PRIVACY NOTE (NEW) -->
+    <div class="privacy-note">
+        <p>
+            ⚠️ All uploaded and generated files are automatically deleted within 10 minutes for your privacy.
+        </p>
+    </div>
+
+</div>
+
+<!-- 💜 CUSTOM POPUP -->
+{% if success %}
+<div id="popup" class="popup-overlay">
+    <div class="popup-box">
+        <p>File uploaded successfully!</p>
+        <button onclick="closePopup()">OK</button>
+    </div>
+</div>
+{% endif %}
+
+<!-- JS -->
+<script>
+function showFileName(input) {
+    document.getElementById("file-name").innerText = input.files[0].name;
+}
+
+function goToChat() {
+    window.location.href = "/chat";
+}
+
+function closePopup() {
+    document.getElementById("popup").style.display = "none";
+    document.getElementById("proceed-section").style.display = "block";
+}
+</script>
+
+<!-- Background -->
+<script src="{{ url_for('static', filename='particles.js') }}"></script>
+
+</body>
+</html>

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Summary</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<nav class="navbar">
+    <div class="logo">DocuMind AI</div>
+    <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/chat">Chat</a>
+        <a href="/summary" class="active">Summary</a>
+        <a href="/voice">Voice</a>
+    </div>
+</nav>
+
+<div class="chat-container">
+
+    <h2 style="text-align:center;">Document Summary</h2>
+
+    <form method="POST" onsubmit="showLoading()">
+        <div class="summary-options">
+            <button name="mode" value="short">Concise</button>
+            <button name="mode" value="medium">Standard</button>
+            <button name="mode" value="detailed">Detailed</button>
+        </div>
+    </form>
+
+    <!-- LOADING -->
+    <p id="loadingText" class="loading-text" style="display:none;">
+        Generating summary...
+    </p>
+
+    {% if result %}
+        <div class="summary-box">
+            {{ result }}
+        </div>
+
+        <!-- DOWNLOAD -->
+        <div class="download-section">
+            <a href="/download_summary" class="download-btn">Download Summary</a>
+        </div>
+    {% endif %}
+
+</div>
+
+<script>
+function showLoading() {
+    document.getElementById("loadingText").style.display = "block";
+}
+</script>
+
+<script src="{{ url_for('static', filename='particles.js') }}"></script>
+
+</body>
+</html>

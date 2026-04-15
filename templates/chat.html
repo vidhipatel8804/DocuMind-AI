@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<nav class="navbar">
+    <div class="logo">DocuMind AI</div>
+    <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/chat" class="active">Chat</a>
+        <a href="/summary">Summary</a>
+        <a href="/voice">Voice</a>
+    </div>
+</nav>
+
+<div class="chat-container">
+
+    <div class="chat-header">
+        <h3>{{ filename }}</h3>
+    </div>
+
+    <div id="chat-box">
+        {% for msg in chat %}
+            <div class="message {{ msg.role }}">
+                {% if msg.role == "ai" and loop.last and is_new %}
+                    <span class="typing" data-text='{{ msg.text | tojson | safe }}'></span>
+                {% else %}
+                    {{ msg.text }}
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+
+    <!-- INPUT -->
+    <form method="POST" onsubmit="showLoading()">
+        <div class="input-group">
+            <input type="text" name="query" placeholder="Ask something..." required>
+            <button id="askBtn" type="submit">Ask</button>
+        </div>
+    </form>
+
+    <!-- LOADING -->
+    <p id="loadingText" class="loading-text" style="display:none;">
+        Thinking...
+    </p>
+
+    <!-- DOWNLOAD -->
+    <div class="download-section">
+        <a href="/download_chat" class="download-btn">Download Chat</a>
+    </div>
+
+</div>
+
+<script>
+function showLoading() {
+    document.getElementById("loadingText").style.display = "block";
+    document.getElementById("askBtn").disabled = true;
+}
+</script>
+
+<!-- Typing Animation -->
+<script>
+function typeEffect(element, text, speed = 5) {
+    let i = 0;
+    element.innerHTML = "";
+
+    function typing() {
+        if (i < text.length) {
+            element.innerHTML += text.charAt(i);
+            i++;
+            setTimeout(typing, speed);
+        }
+    }
+
+    typing();
+}
+
+window.onload = () => {
+    const el = document.querySelector(".typing");
+
+    if (el) {
+        let text = el.getAttribute("data-text");
+
+        try { text = JSON.parse(text); } catch (e) {}
+
+        typeEffect(el, text, 10); // speed control
+    }
+};
+</script>
+
+<script src="{{ url_for('static', filename='particles.js') }}"></script>
+
+</body>
+</html>

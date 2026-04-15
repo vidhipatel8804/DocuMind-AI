@@ -1,0 +1,8 @@
+flask
+sentence-transformers
+faiss-cpu
+pypdf
+python-dotenv
+google-genai
+numpy
+reportlab
