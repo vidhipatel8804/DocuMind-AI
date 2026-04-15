@@ -334,8 +334,9 @@ def download_voice():
     return send_file(create_pdf(content, "voice.pdf"), as_attachment=True)
 
 # ========================
-if __name__ == "__main__":
-    # Start background cleaner
-    threading.Thread(target=auto_cleanup, daemon=True).start()
+# START BACKGROUND CLEANER (always runs)
+threading.Thread(target=auto_cleanup, daemon=True).start()
 
-    app.run(debug=False)
+# ========================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
