@@ -1,16 +1,12 @@
 import os
+import re
 import time
-import numpy as np
-import faiss
 import threading
 
 from flask import Flask, render_template, request, redirect, url_for, send_file
-from sentence_transformers import SentenceTransformer
 from pypdf import PdfReader
 from dotenv import load_dotenv
 from google import genai
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
 
 load_dotenv()
 
@@ -25,10 +21,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # ========================
 # GLOBAL VARIABLES
 # ========================
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
 stored_chunks = None
-stored_index = None
 uploaded_filename = None
 upload_time = None
 
@@ -36,13 +29,20 @@ chat_history = []
 voice_history = []
 last_summary = None
 
-gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how",
+    "in", "is", "it", "of", "on", "or", "that", "the", "this", "to", "was",
+    "were", "what", "when", "where", "which", "who", "why", "with", "you",
+    "your"
+}
+
+gemini_client = None
 
 # ========================
 # AUTO DELETE FILES
 # ========================
 def check_expiry():
-    global stored_chunks, stored_index, upload_time, uploaded_filename, last_summary
+    global stored_chunks, upload_time, uploaded_filename, last_summary
     global chat_history, voice_history
 
     current_time = time.time()
@@ -50,7 +50,6 @@ def check_expiry():
     # 🧠 Clear memory
     if upload_time and current_time - upload_time > 600:
         stored_chunks = None
-        stored_index = None
         uploaded_filename = None
         last_summary = None
         chat_history = []
@@ -90,27 +89,82 @@ def chunk_text(text, size=500):
     words = text.split()
     return [" ".join(words[i:i+size]) for i in range(0, len(words), size)]
 
-def create_index(chunks):
-    embeddings = model.encode(chunks)
-    dim = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dim)
-    index.add(np.array(embeddings))
-    return index
+def tokenize(text):
+    return [
+        token for token in re.findall(r"[a-z0-9]+", text.lower())
+        if len(token) > 2 and token not in STOPWORDS
+    ]
 
-def search(query, index, chunks):
-    q_emb = model.encode([query])
-    D, I = index.search(np.array(q_emb), k=3)
-    return " ".join([chunks[i] for i in I[0]])
+def build_context(chunks, max_chars=16000):
+    context_parts = []
+    total_chars = 0
+
+    for chunk in chunks:
+        remaining = max_chars - total_chars
+        if remaining <= 0:
+            break
+
+        snippet = chunk[:remaining]
+        context_parts.append(snippet)
+        total_chars += len(snippet)
+
+    return "\n\n".join(context_parts)
+
+def get_gemini_client():
+    global gemini_client
+
+    if gemini_client is None:
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "Missing GOOGLE_API_KEY. Add it to your environment before using chat or summary features."
+            )
+
+        gemini_client = genai.Client(api_key=api_key)
+
+    return gemini_client
+
+def search(query, chunks, top_k=3, max_chars=12000):
+    if not chunks:
+        return ""
+
+    query_terms = tokenize(query)
+    if not query_terms:
+        return build_context(chunks[:top_k], max_chars=max_chars)
+
+    scored_chunks = []
+    unique_terms = set(query_terms)
+
+    for index, chunk in enumerate(chunks):
+        chunk_lower = chunk.lower()
+        unique_hits = sum(1 for term in unique_terms if term in chunk_lower)
+        frequency_hits = sum(chunk_lower.count(term) for term in query_terms)
+        score = unique_hits * 10 + frequency_hits
+
+        if score > 0:
+            scored_chunks.append((score, index, chunk))
+
+    if not scored_chunks:
+        selected_chunks = chunks[:top_k]
+    else:
+        scored_chunks.sort(key=lambda item: (-item[0], item[1]))
+        selected_chunks = [chunk for _, _, chunk in scored_chunks[:top_k]]
+
+    return build_context(selected_chunks, max_chars=max_chars)
 
 # ========================
 # GEMINI
 # ========================
 def generate_answer(question, context):
-    prompt = f"Answer briefly:\nContext: {context}\nQuestion: {question}"
+    prompt = (
+        "Answer the question using only the document context below. "
+        "If the answer is not in the document, say that clearly in one short sentence.\n\n"
+        f"Context:\n{context}\n\nQuestion: {question}"
+    )
 
     try:
         # 🔹 First attempt
-        response = gemini_client.models.generate_content(
+        response = get_gemini_client().models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
         )
@@ -119,6 +173,8 @@ def generate_answer(question, context):
             cleaned = response.text.replace("\n", " ").strip()
             return " ".join(cleaned.split())
 
+    except RuntimeError as exc:
+        return str(exc)
     except Exception as e:
         print("First attempt failed:", e)
 
@@ -127,7 +183,7 @@ def generate_answer(question, context):
 
         try:
             print("Retrying...")
-            response = gemini_client.models.generate_content(
+            response = get_gemini_client().models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt
             )
@@ -157,11 +213,11 @@ def generate_summary(mode):
 
     try:
         # 🔥 IMPORTANT: pass document content
-        text = " ".join(stored_chunks[:15])
+        text = build_context(stored_chunks, max_chars=18000)
 
         prompt = f"{prompts.get(mode)}\n\nDocument:\n{text}"
 
-        response = gemini_client.models.generate_content(
+        response = get_gemini_client().models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt
         )
@@ -172,6 +228,8 @@ def generate_summary(mode):
         cleaned = response.text.strip()
         return cleaned
 
+    except RuntimeError as exc:
+        return str(exc)
     except Exception as e:
         print("SUMMARY ERROR:", e)
         return "⚠️ Unable to generate summary. Please try again."
@@ -180,6 +238,15 @@ def generate_summary(mode):
 # PDF GENERATOR
 # ========================
 def create_pdf(content, filename):
+    try:
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "PDF export requires the 'reportlab' package. Install it with "
+            "'pip install -r requirements.txt' or 'pip install reportlab'."
+        ) from exc
+
     path = os.path.join(UPLOAD_FOLDER, filename)
 
     doc = SimpleDocTemplate(path)
@@ -199,7 +266,7 @@ def create_pdf(content, filename):
 
 @app.route("/", methods=["GET", "POST"])
 def upload():
-    global stored_chunks, stored_index, uploaded_filename, upload_time
+    global stored_chunks, uploaded_filename, upload_time
     global chat_history, voice_history
 
     check_expiry()
@@ -213,10 +280,8 @@ def upload():
 
             text = extract_text(file_path)
             chunks = chunk_text(text)
-            index = create_index(chunks)
 
             stored_chunks = chunks
-            stored_index = index
             uploaded_filename = file.filename
             upload_time = time.time()
 
@@ -237,14 +302,14 @@ def chat():
 
     check_expiry()
 
-    if stored_index is None:
+    if stored_chunks is None:
         return redirect(url_for("upload"))
 
     if request.method == "POST":
         q = request.form.get("query")
 
         if q:
-            res = generate_answer(q, search(q, stored_index, stored_chunks))
+            res = generate_answer(q, search(q, stored_chunks))
 
             chat_history.append({"role": "user", "text": q})
             chat_history.append({"role": "ai", "text": res})
@@ -274,7 +339,7 @@ def voice():
         q = request.form.get("query")
 
         if q:
-            res = generate_answer(q, search(q, stored_index, stored_chunks))
+            res = generate_answer(q, search(q, stored_chunks))
 
             voice_history.append({"role": "user", "text": q})
             voice_history.append({"role": "ai", "text": res})
@@ -311,7 +376,10 @@ def download_chat():
         role = "You" if m["role"] == "user" else "AI"
         content.append(f"<b>{role}:</b> {m['text']}")
 
-    return send_file(create_pdf(content, "chat.pdf"), as_attachment=True)
+    try:
+        return send_file(create_pdf(content, "chat.pdf"), as_attachment=True)
+    except RuntimeError as exc:
+        return str(exc), 503
 
 @app.route("/download_summary")
 def download_summary():
@@ -322,7 +390,10 @@ def download_summary():
 
     content = [f"<b>Summary:</b> {last_summary}"]
 
-    return send_file(create_pdf(content, "summary.pdf"), as_attachment=True)
+    try:
+        return send_file(create_pdf(content, "summary.pdf"), as_attachment=True)
+    except RuntimeError as exc:
+        return str(exc), 503
 
 @app.route("/download_voice")
 def download_voice():
@@ -331,7 +402,10 @@ def download_voice():
         role = "You" if m["role"] == "user" else "AI"
         content.append(f"<b>{role}:</b> {m['text']}")
 
-    return send_file(create_pdf(content, "voice.pdf"), as_attachment=True)
+    try:
+        return send_file(create_pdf(content, "voice.pdf"), as_attachment=True)
+    except RuntimeError as exc:
+        return str(exc), 503
 
 # ========================
 # START BACKGROUND CLEANER (always runs)
