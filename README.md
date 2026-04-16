@@ -41,7 +41,7 @@ The system uses a **context-based retrieval approach** combined with **Google Ge
 - **Backend:** Flask  
 - **Frontend:** HTML, CSS, JavaScript  
 - **AI Model:** Google Gemini API  
-- **Core Concept:** Context-Based Retrieval  
+- **Core Concept:** Context-Based Retrieval, LLM
 - **Libraries:** PyPDF, ReportLab  
 
 ---
