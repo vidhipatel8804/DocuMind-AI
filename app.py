@@ -2,8 +2,9 @@ import os
 import re
 import time
 import threading
+import uuid
 
-from flask import Flask, render_template, request, redirect, url_for, send_file
+from flask import Flask, render_template, request, redirect, url_for, send_file, session
 from pypdf import PdfReader
 from dotenv import load_dotenv
 from google import genai
@@ -11,6 +12,7 @@ from google import genai
 load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", os.urandom(24))
 
 # ========================
 # CONFIG
@@ -19,15 +21,25 @@ UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ========================
-# GLOBAL VARIABLES
+# SESSIONS & VARIABLES
 # ========================
-stored_chunks = None
-uploaded_filename = None
-upload_time = None
+user_sessions = {}
 
-chat_history = []
-voice_history = []
-last_summary = None
+def get_session_data():
+    if "session_id" not in session:
+        session["session_id"] = str(uuid.uuid4())
+    
+    sid = session["session_id"]
+    if sid not in user_sessions:
+        user_sessions[sid] = {
+            "stored_chunks": None,
+            "uploaded_filename": None,
+            "upload_time": None,
+            "chat_history": [],
+            "voice_history": [],
+            "last_summary": None
+        }
+    return user_sessions[sid]
 
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how",
@@ -42,18 +54,16 @@ gemini_client = None
 # AUTO DELETE FILES
 # ========================
 def check_expiry():
-    global stored_chunks, upload_time, uploaded_filename, last_summary
-    global chat_history, voice_history
-
     current_time = time.time()
 
     # 🧠 Clear memory
-    if upload_time and current_time - upload_time > 600:
-        stored_chunks = None
-        uploaded_filename = None
-        last_summary = None
-        chat_history = []
-        voice_history = []
+    expired_sessions = []
+    for sid, data in list(user_sessions.items()):
+        if data.get("upload_time") and current_time - data["upload_time"] > 600:
+            expired_sessions.append(sid)
+            
+    for sid in expired_sessions:
+        user_sessions.pop(sid, None)
 
     # 🗂️ Delete old files
     if os.path.exists(UPLOAD_FOLDER):
@@ -198,11 +208,9 @@ def generate_answer(question, context):
     # ❌ Final fallback
     return "⚠️ AI is busy right now. Please try again in a few seconds."
 
-def generate_summary(mode):
-    global stored_chunks
-
+def generate_summary(mode, chunks):
     # ✅ SAFETY CHECK (ADD THIS)
-    if not stored_chunks:
+    if not chunks:
         return "⚠️ No document available"
     
     prompts = {
@@ -213,7 +221,7 @@ def generate_summary(mode):
 
     try:
         # 🔥 IMPORTANT: pass document content
-        text = build_context(stored_chunks, max_chars=18000)
+        text = build_context(chunks, max_chars=18000)
 
         prompt = f"{prompts.get(mode)}\n\nDocument:\n{text}"
 
@@ -266,9 +274,7 @@ def create_pdf(content, filename):
 
 @app.route("/", methods=["GET", "POST"])
 def upload():
-    global stored_chunks, uploaded_filename, upload_time
-    global chat_history, voice_history
-
+    session_data = get_session_data()
     check_expiry()
 
     if request.method == "POST":
@@ -281,13 +287,13 @@ def upload():
             text = extract_text(file_path)
             chunks = chunk_text(text)
 
-            stored_chunks = chunks
-            uploaded_filename = file.filename
-            upload_time = time.time()
+            session_data["stored_chunks"] = chunks
+            session_data["uploaded_filename"] = file.filename
+            session_data["upload_time"] = time.time()
 
             # RESET histories
-            chat_history = []
-            voice_history = []
+            session_data["chat_history"] = []
+            session_data["voice_history"] = []
 
             return render_template("upload.html", success=True)
 
@@ -298,28 +304,27 @@ def upload():
 # ========================
 @app.route("/chat", methods=["GET", "POST"])
 def chat():
-    global chat_history
-
+    session_data = get_session_data()
     check_expiry()
 
-    if stored_chunks is None:
+    if session_data["stored_chunks"] is None:
         return redirect(url_for("upload"))
 
     if request.method == "POST":
         q = request.form.get("query")
 
         if q:
-            res = generate_answer(q, search(q, stored_chunks))
+            res = generate_answer(q, search(q, session_data["stored_chunks"]))
 
-            chat_history.append({"role": "user", "text": q})
-            chat_history.append({"role": "ai", "text": res})
+            session_data["chat_history"].append({"role": "user", "text": q})
+            session_data["chat_history"].append({"role": "ai", "text": res})
 
     is_new = request.method == "POST"
 
     return render_template(
         "chat.html",
-        chat=chat_history,
-        filename=uploaded_filename,
+        chat=session_data["chat_history"],
+        filename=session_data["uploaded_filename"],
         is_new=is_new
     )
 
@@ -328,41 +333,40 @@ def chat():
 # ========================
 @app.route("/voice", methods=["GET", "POST"])
 def voice():
-    global voice_history
-
+    session_data = get_session_data()
     check_expiry()
 
-    if stored_chunks is None:
+    if session_data["stored_chunks"] is None:
         return redirect(url_for("upload"))
 
     if request.method == "POST":
         q = request.form.get("query")
 
         if q:
-            res = generate_answer(q, search(q, stored_chunks))
+            res = generate_answer(q, search(q, session_data["stored_chunks"]))
 
-            voice_history.append({"role": "user", "text": q})
-            voice_history.append({"role": "ai", "text": res})
+            session_data["voice_history"].append({"role": "user", "text": q})
+            session_data["voice_history"].append({"role": "ai", "text": res})
 
-    return render_template("voice.html", chat=voice_history)
+    return render_template("voice.html", chat=session_data["voice_history"])
 
 # ========================
 # SUMMARY
 # ========================
 @app.route("/summary", methods=["GET", "POST"])
 def summary():
+    session_data = get_session_data()
     check_expiry()
 
-    if stored_chunks is None:
+    if session_data["stored_chunks"] is None:
         return redirect(url_for("upload"))
 
     result = None
-    global last_summary
 
     if request.method == "POST":
         mode = request.form.get("mode")
-        result = generate_summary(mode)
-        last_summary = result
+        result = generate_summary(mode, session_data["stored_chunks"])
+        session_data["last_summary"] = result
 
     return render_template("summary.html", result=result)
 
@@ -371,8 +375,9 @@ def summary():
 # ========================
 @app.route("/download_chat")
 def download_chat():
+    session_data = get_session_data()
     content = []
-    for m in chat_history:
+    for m in session_data["chat_history"]:
         role = "You" if m["role"] == "user" else "AI"
         content.append(f"<b>{role}:</b> {m['text']}")
 
@@ -383,12 +388,12 @@ def download_chat():
 
 @app.route("/download_summary")
 def download_summary():
-    global last_summary
+    session_data = get_session_data()
 
-    if not last_summary:
+    if not session_data["last_summary"]:
         return redirect(url_for("summary"))
 
-    content = [f"<b>Summary:</b> {last_summary}"]
+    content = [f"<b>Summary:</b> {session_data['last_summary']}"]
 
     try:
         return send_file(create_pdf(content, "summary.pdf"), as_attachment=True)
@@ -397,8 +402,9 @@ def download_summary():
 
 @app.route("/download_voice")
 def download_voice():
+    session_data = get_session_data()
     content = []
-    for m in voice_history:
+    for m in session_data["voice_history"]:
         role = "You" if m["role"] == "user" else "AI"
         content.append(f"<b>{role}:</b> {m['text']}")
 
