@@ -34,16 +34,36 @@
         </div>
     </form>
 
-    <p id="loadingText" class="loading-text" style="display:none;">Processing...</p>
+    <!-- LOADING -->
+    <p id="loadingText" class="loading-text" style="display:none;">
+        Processing...
+    </p>
 
+    <!-- CHAT -->
     <div id="chat-box">
+
     {% for msg in chat %}
+
         <div class="message {{ msg.role }}">
-            {{ msg.text }}
+
+            {% if msg.role == "ai" and loop.last and request.method == "POST" %}
+
+                <span class="typing"
+                      data-text='{{ msg.text | tojson | safe }}'></span>
+
+            {% else %}
+
+                {{ msg.text }}
+
+            {% endif %}
+
         </div>
+
     {% endfor %}
+
     </div>
 
+    <!-- DOWNLOAD -->
     <div class="download-section">
         <a href="/download_voice" class="download-btn">Download PDF</a>
     </div>
@@ -61,6 +81,7 @@ function startListening() {
     const statusText = document.getElementById("statusText");
 
     const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+
     recognition.lang = "en-US";
 
     micBtn.classList.add("listening");
@@ -82,6 +103,36 @@ function startListening() {
         statusText.innerText = "⚠️ Mic error";
     };
 }
+</script>
+
+<!-- Typing Animation -->
+<script>
+function typeEffect(element, text, speed = 5) {
+    let i = 0;
+    element.innerHTML = "";
+
+    function typing() {
+        if (i < text.length) {
+            element.innerHTML += text.charAt(i);
+            i++;
+            setTimeout(typing, speed);
+        }
+    }
+
+    typing();
+}
+
+window.onload = () => {
+    const el = document.querySelector(".typing");
+
+    if (el) {
+        let text = el.getAttribute("data-text");
+
+        try { text = JSON.parse(text); } catch (e) {}
+
+        typeEffect(el, text, 10);
+    }
+};
 </script>
 
 <script src="{{ url_for('static', filename='particles.js') }}"></script>
