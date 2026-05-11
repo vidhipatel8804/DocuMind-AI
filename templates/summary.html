@@ -39,7 +39,10 @@
 
     {% if result %}
         <div class="summary-box">
-            {{ result }}
+
+            <span class="typing"
+                  data-text='{{ result | tojson | safe }}'></span>
+
         </div>
 
         <!-- DOWNLOAD -->
@@ -54,6 +57,36 @@
 function showLoading() {
     document.getElementById("loadingText").style.display = "block";
 }
+</script>
+
+<!-- Typing Animation -->
+<script>
+function typeEffect(element, text, speed = 5) {
+    let i = 0;
+    element.innerHTML = "";
+
+    function typing() {
+        if (i < text.length) {
+            element.innerHTML += text.charAt(i);
+            i++;
+            setTimeout(typing, speed);
+        }
+    }
+
+    typing();
+}
+
+window.onload = () => {
+    const el = document.querySelector(".typing");
+
+    if (el) {
+        let text = el.getAttribute("data-text");
+
+        try { text = JSON.parse(text); } catch (e) {}
+
+        typeEffect(el, text, 10);
+    }
+};
 </script>
 
 <script src="{{ url_for('static', filename='particles.js') }}"></script>
